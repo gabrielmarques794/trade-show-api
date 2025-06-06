@@ -11,7 +11,7 @@ import json
 
 app = FastAPI()
 
-openai.api_key = os.getenv("OPENAI_API_KEY")  # Make sure to set this in your Render environment
+openai.api_key = os.getenv("OPENAI_API_KEY")  # Make sure to set this in your local environment
 
 KNOWN_SHOWS = {
     "uk.healthoptimisation.com": "https://uk.healthoptimisation.com/page/3902835/exhibitor-lineup",
@@ -24,6 +24,28 @@ KNOWN_SHOWS = {
 
 class ShowURL(BaseModel):
     url: str
+
+from playwright.sync_api import sync_playwright
+
+def get_rendered_html(url):
+    from playwright.sync_api import sync_playwright
+    import traceback
+
+    print(f"[Playwright] Attempting to open: {url}")
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=False, slow_mo=100)
+            page = browser.new_page()
+            response = page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            print(f"[Playwright] Response status: {response.status if response else 'No response'}")
+            content = page.content()
+            print("[Playwright] Page content retrieved.")
+            browser.close()
+            return content
+    except Exception as e:
+        print("[Playwright ERROR]")
+        traceback.print_exc()
+        return ""
 
 def ask_gpt_for_exhibitor_link(base_url, html):
     prompt = f"""
@@ -94,6 +116,10 @@ HTML (first 15000 characters):
 
 def find_exhibitor_page(base_url):
     try:
+        if any(keyword in base_url.lower() for keyword in ['exhibit', 'sponsor', 'lineup', 'partners']):
+            print(f"[Direct match] Using provided URL as exhibitor page: {base_url}")
+            return base_url
+
         parsed = urlparse(base_url)
         domain = parsed.hostname or ""
 
@@ -127,14 +153,14 @@ def find_exhibitor_page(base_url):
 
 def scrape_exhibitors(url):
     try:
-        res = requests.get(url, timeout=10)
-        return ask_gpt_to_extract_exhibitors(res.text)
+        html = get_rendered_html(url)
+        return ask_gpt_to_extract_exhibitors(html)
     except Exception as e:
         print(f"Error scraping: {e}")
         return []
 
 def save_to_csv(exhibitors, filename):
-    filepath = os.path.join("/tmp", filename)
+    filepath = os.path.join(os.getcwd(), filename)
     with open(filepath, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.DictWriter(file, fieldnames=['Name', 'Booth'])
         writer.writeheader()
