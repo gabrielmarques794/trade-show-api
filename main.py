@@ -22,8 +22,9 @@ def ask_gpt_for_exhibitor_link(base_url, html):
     return the most likely full URL path (not just the path, but full URL) for the exhibitor list page.
     Respond ONLY with the most likely full URL to the exhibitor page.
 
-    HTML:
-    {html[:4000]}
+    HTML (first 15000 characters):
+{html[:15000]}
+
     """
     try:
         response = openai.chat.completions.create(
