@@ -25,11 +25,15 @@ def ask_gpt_for_exhibitor_link(base_url, html):
     {html[:4000]}
     """
     try:
-        response = openai.ChatCompletion.create(
+        response = openai.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}]
         )
-        return response['choices'][0]['message']['content'].strip()
+        result = response.choices[0].message.content.strip()
+        print(f"[GPT link guess]: {result}")
+        if not result.startswith("http"):
+            return None
+        return result
     except Exception as e:
         print(f"GPT fallback failed: {e}")
         return None
@@ -46,11 +50,13 @@ def ask_gpt_to_extract_exhibitors(html):
     {html[:4000]}
     """
     try:
-        response = openai.ChatCompletion.create(
+        response = openai.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}]
         )
-        return eval(response['choices'][0]['message']['content'].strip())
+        raw = response.choices[0].message.content.strip()
+        print(f"[GPT data guess]: {raw[:300]}...")
+        return eval(raw)
     except Exception as e:
         print(f"GPT content extraction failed: {e}")
         return []
@@ -67,7 +73,10 @@ def find_exhibitor_page(base_url):
                 return urljoin(base_url, link['href'])
 
         # fallback to GPT if not found
-        return ask_gpt_for_exhibitor_link(base_url, res.text)
+        gpt_guess = ask_gpt_for_exhibitor_link(base_url, res.text)
+        if gpt_guess:
+            return gpt_guess
+        return None
     except Exception as e:
         print(f"Error finding exhibitor page: {e}")
         return None
