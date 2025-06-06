@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import csv
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 import openai
 import json
 
@@ -13,11 +13,20 @@ app = FastAPI()
 
 openai.api_key = os.getenv("OPENAI_API_KEY")  # Make sure to set this in your Render environment
 
+KNOWN_SHOWS = {
+    "uk.healthoptimisation.com": "https://uk.healthoptimisation.com/page/3902835/exhibitor-lineup",
+    "expowest.com": "https://www.expowest.com/en/exhibitor-list.html",
+    "npe.org": "https://npe.org/exhibitors",
+    "naturallynetwork.org": "https://www.naturallynetwork.org/sponsors",
+    "worldteaconference.com": "https://worldteaconference.com/exhibitor-list",
+    "supplysideeast.com": "https://east.supplysideshow.com/en/exhibitor-list.html"
+}
+
 class ShowURL(BaseModel):
     url: str
 
 def ask_gpt_for_exhibitor_link(base_url, html):
-    prompt = f"""  # ← this line should NOT be indented more than this
+    prompt = f"""
 You're a smart crawler trained to analyze trade show websites.
 
 From the HTML provided below, your job is to:
@@ -46,22 +55,22 @@ HTML (first 15000 characters):
 
 def ask_gpt_to_extract_exhibitors(html):
     prompt = f"""
-    Extract a list of exhibitors from the following HTML.
-    For each exhibitor, return:
-    - Name
-    - Booth (if available)
+Extract a list of exhibitors from the following HTML.
+For each exhibitor, return:
+- Name
+- Booth (if available)
 
-    Format the response strictly as a JSON array of objects like:
-    [
-      {{ "Name": "Example Exhibitor", "Booth": "123" }},
-      {{ "Name": "Another Brand", "Booth": "A45" }}
-    ]
+Format the response strictly as a JSON array of objects like:
+[
+  {{ "Name": "Example Exhibitor", "Booth": "123" }},
+  {{ "Name": "Another Brand", "Booth": "A45" }}
+]
 
-    Do not include markdown, explanations, or extra formatting.
+Do not include markdown, explanations, or extra formatting.
 
-    HTML:
-    {html[:4000]}
-    """
+HTML (first 15000 characters):
+{html[:15000]}
+"""
     try:
         response = openai.chat.completions.create(
             model="gpt-4",
@@ -70,7 +79,6 @@ def ask_gpt_to_extract_exhibitors(html):
         raw = response.choices[0].message.content.strip()
         print(f"[GPT data guess]: {raw[:300]}...")
 
-        # Clean up markdown formatting if present
         if raw.startswith("```json"):
             raw = raw.removeprefix("```json").removesuffix("```").strip()
         elif raw.startswith("```"):
@@ -78,8 +86,6 @@ def ask_gpt_to_extract_exhibitors(html):
 
         print(f"[Cleaned GPT data]: {raw[:300]}...")
         parsed = json.loads(raw)
-
-        # Filter out generic or low-value entries
         filtered = [item for item in parsed if item.get("Name") and len(item["Name"]) > 3 and "exhibit" not in item["Name"].lower()]
         return filtered[:100]
     except Exception as e:
@@ -88,8 +94,16 @@ def ask_gpt_to_extract_exhibitors(html):
 
 def find_exhibitor_page(base_url):
     try:
+        parsed = urlparse(base_url)
+        domain = parsed.hostname or ""
+
+        if domain in KNOWN_SHOWS:
+            print(f"[Known show match] Using hardcoded link for {domain}")
+            return KNOWN_SHOWS[domain]
+
         res = requests.get(base_url, timeout=10)
         soup = BeautifulSoup(res.text, 'html.parser')
+
         for link in soup.find_all('a', href=True):
             href = link['href'].lower()
             text = link.get_text(strip=True).lower()
@@ -97,10 +111,15 @@ def find_exhibitor_page(base_url):
             if any(keyword in href or keyword in text for keyword in ['exhibit', 'exhibitor', 'lineup', 'line-up', 'sponsor', 'partners', 'expo']):
                 return urljoin(base_url, link['href'])
 
-        # fallback to GPT if not found
         gpt_guess = ask_gpt_for_exhibitor_link(base_url, res.text)
         if gpt_guess:
-            return gpt_guess
+            try:
+                gpt_check = requests.get(gpt_guess, timeout=10)
+                if gpt_check.status_code == 200:
+                    return gpt_guess
+            except Exception as e:
+                print(f"GPT guessed URL failed to load: {e}")
+
         return None
     except Exception as e:
         print(f"Error finding exhibitor page: {e}")
