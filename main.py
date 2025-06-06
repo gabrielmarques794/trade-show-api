@@ -7,6 +7,7 @@ import os
 import csv
 from urllib.parse import urljoin
 import openai
+import json
 
 app = FastAPI()
 
@@ -44,7 +45,14 @@ def ask_gpt_to_extract_exhibitors(html):
     For each exhibitor, return:
     - Name
     - Booth (if available)
-    Format the response as a JSON array with objects that have 'Name' and 'Booth' fields.
+
+    Format the response strictly as a JSON array of objects like:
+    [
+      {{ "Name": "Example Exhibitor", "Booth": "123" }},
+      {{ "Name": "Another Brand", "Booth": "A45" }}
+    ]
+
+    Do not include markdown, explanations, or extra formatting.
 
     HTML:
     {html[:4000]}
@@ -64,7 +72,11 @@ def ask_gpt_to_extract_exhibitors(html):
             raw = raw.removeprefix("```").removesuffix("```").strip()
 
         print(f"[Cleaned GPT data]: {raw[:300]}...")
-        return eval(raw)
+        parsed = json.loads(raw)
+
+        # Filter out generic or low-value entries
+        filtered = [item for item in parsed if item.get("Name") and len(item["Name"]) > 3 and "exhibit" not in item["Name"].lower()]
+        return filtered[:100]
     except Exception as e:
         print(f"GPT content extraction failed: {e}")
         return []
@@ -97,14 +109,13 @@ def scrape_exhibitors(url):
 
         for item in soup.find_all(['div', 'li']):
             text = item.get_text(" ", strip=True)
-            if text and len(text.split()) <= 15:
+            if text and len(text.split()) <= 15 and "exhibit" not in text.lower():
                 exhibitors.append({
                     'Name': text,
                     'Booth': ''
                 })
 
         if not exhibitors:
-            # fallback to GPT extraction if nothing usable found
             return ask_gpt_to_extract_exhibitors(res.text)
 
         return exhibitors[:100]
