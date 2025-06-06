@@ -17,7 +17,7 @@ class ShowURL(BaseModel):
     url: str
 
 def ask_gpt_for_exhibitor_link(base_url, html):
- prompt = f"""
+    prompt = f"""  # ← this line should NOT be indented more than this
 You're a smart crawler trained to analyze trade show websites.
 
 From the HTML provided below, your job is to:
@@ -30,9 +30,6 @@ The homepage URL is: {base_url}
 HTML (first 15000 characters):
 {html[:15000]}
 """
-
-
-    """
     try:
         response = openai.chat.completions.create(
             model="gpt-4",
