@@ -128,21 +128,7 @@ def find_exhibitor_page(base_url):
 def scrape_exhibitors(url):
     try:
         res = requests.get(url, timeout=10)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        exhibitors = []
-
-        for item in soup.find_all(['div', 'li']):
-            text = item.get_text(" ", strip=True)
-            if text and len(text.split()) <= 15 and "exhibit" not in text.lower():
-                exhibitors.append({
-                    'Name': text,
-                    'Booth': ''
-                })
-
-        if not exhibitors:
-            return ask_gpt_to_extract_exhibitors(res.text)
-
-        return exhibitors[:100]
+        return ask_gpt_to_extract_exhibitors(res.text)
     except Exception as e:
         print(f"Error scraping: {e}")
         return []
