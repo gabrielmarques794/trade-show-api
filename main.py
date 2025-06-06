@@ -5,12 +5,55 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import csv
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
+import openai
 
 app = FastAPI()
 
+openai.api_key = os.getenv("OPENAI_API_KEY")  # Make sure to set this in your Render environment
+
 class ShowURL(BaseModel):
     url: str
+
+def ask_gpt_for_exhibitor_link(base_url, html):
+    prompt = f"""
+    Given the following HTML from a trade show homepage ({base_url}),
+    return the most likely full URL path (not just the path, but full URL) for the exhibitor list page.
+    Respond ONLY with the most likely full URL to the exhibitor page.
+
+    HTML:
+    {html[:4000]}
+    """
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response['choices'][0]['message']['content'].strip()
+    except Exception as e:
+        print(f"GPT fallback failed: {e}")
+        return None
+
+def ask_gpt_to_extract_exhibitors(html):
+    prompt = f"""
+    Extract a list of exhibitors from the following HTML.
+    For each exhibitor, return:
+    - Name
+    - Booth (if available)
+    Format the response as a JSON array with objects that have 'Name' and 'Booth' fields.
+
+    HTML:
+    {html[:4000]}
+    """
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return eval(response['choices'][0]['message']['content'].strip())
+    except Exception as e:
+        print(f"GPT content extraction failed: {e}")
+        return []
 
 def find_exhibitor_page(base_url):
     try:
@@ -19,9 +62,12 @@ def find_exhibitor_page(base_url):
         for link in soup.find_all('a', href=True):
             href = link['href'].lower()
             text = link.get_text(strip=True).lower()
-            if any(keyword in href or keyword in text for keyword in ['exhibit', 'exhibitor', 'lineup', 'sponsor', 'partners']):
+            print(f"Found link: {text} -> {href}")
+            if any(keyword in href or keyword in text for keyword in ['exhibit', 'exhibitor', 'lineup', 'line-up', 'sponsor', 'partners', 'expo']):
                 return urljoin(base_url, link['href'])
-        return None
+
+        # fallback to GPT if not found
+        return ask_gpt_for_exhibitor_link(base_url, res.text)
     except Exception as e:
         print(f"Error finding exhibitor page: {e}")
         return None
@@ -32,16 +78,19 @@ def scrape_exhibitors(url):
         soup = BeautifulSoup(res.text, 'html.parser')
         exhibitors = []
 
-        # Generalized scraping pattern — customize per show if needed
         for item in soup.find_all(['div', 'li']):
             text = item.get_text(" ", strip=True)
-            if text and len(text.split()) <= 15:  # crude filter
+            if text and len(text.split()) <= 15:
                 exhibitors.append({
                     'Name': text,
-                    'Booth': ''  # You can improve with regex or specific parsing
+                    'Booth': ''
                 })
 
-        return exhibitors[:100]  # limit to 100 for safety
+        if not exhibitors:
+            # fallback to GPT extraction if nothing usable found
+            return ask_gpt_to_extract_exhibitors(res.text)
+
+        return exhibitors[:100]
     except Exception as e:
         print(f"Error scraping: {e}")
         return []
