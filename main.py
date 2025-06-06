@@ -56,6 +56,14 @@ def ask_gpt_to_extract_exhibitors(html):
         )
         raw = response.choices[0].message.content.strip()
         print(f"[GPT data guess]: {raw[:300]}...")
+
+        # Clean up markdown formatting if present
+        if raw.startswith("```json"):
+            raw = raw.removeprefix("```json").removesuffix("```").strip()
+        elif raw.startswith("```"):
+            raw = raw.removeprefix("```").removesuffix("```").strip()
+
+        print(f"[Cleaned GPT data]: {raw[:300]}...")
         return eval(raw)
     except Exception as e:
         print(f"GPT content extraction failed: {e}")
