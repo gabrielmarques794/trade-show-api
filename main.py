@@ -1,37 +1,70 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List
 import requests
 from bs4 import BeautifulSoup
+import os
+import csv
+from urllib.parse import urljoin, urlparse
 
 app = FastAPI()
 
-class URLInput(BaseModel):
+class ShowURL(BaseModel):
     url: str
 
-class Exhibitor(BaseModel):
-    name: str
-    company: str
-    title: str = None
-    booth: str = None
+def find_exhibitor_page(base_url):
+    try:
+        res = requests.get(base_url, timeout=10)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        for link in soup.find_all('a', href=True):
+            href = link['href'].lower()
+            text = link.get_text(strip=True).lower()
+            if any(keyword in href or keyword in text for keyword in ['exhibit', 'exhibitor', 'lineup', 'sponsor', 'partners']):
+                return urljoin(base_url, link['href'])
+        return None
+    except Exception as e:
+        print(f"Error finding exhibitor page: {e}")
+        return None
 
-@app.post("/scrape", response_model=List[Exhibitor])
-def scrape(input: URLInput):
-    response = requests.get(input.url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    exhibitors = []
+def scrape_exhibitors(url):
+    try:
+        res = requests.get(url, timeout=10)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        exhibitors = []
 
-    for card in soup.select('.exhibitor-card'):  # MUDE AQUI conforme o site real
-        name = card.select_one('.exhibitor-name')
-        company = card.select_one('.company')
-        title = card.select_one('.title')
-        booth = card.select_one('.booth')
+        # Generalized scraping pattern — customize per show if needed
+        for item in soup.find_all(['div', 'li']):
+            text = item.get_text(" ", strip=True)
+            if text and len(text.split()) <= 15:  # crude filter
+                exhibitors.append({
+                    'Name': text,
+                    'Booth': ''  # You can improve with regex or specific parsing
+                })
 
-        exhibitors.append(Exhibitor(
-            name=name.text.strip() if name else '',
-            company=company.text.strip() if company else '',
-            title=title.text.strip() if title else None,
-            booth=booth.text.strip() if booth else None
-        ))
+        return exhibitors[:100]  # limit to 100 for safety
+    except Exception as e:
+        print(f"Error scraping: {e}")
+        return []
 
-    return exhibitors
+def save_to_csv(exhibitors, filename):
+    filepath = os.path.join("/tmp", filename)
+    with open(filepath, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.DictWriter(file, fieldnames=['Name', 'Booth'])
+        writer.writeheader()
+        for exhibitor in exhibitors:
+            writer.writerow(exhibitor)
+    return filepath
+
+@app.post("/extract")
+def extract_and_return_csv(input: ShowURL):
+    base_url = input.url
+    exhibitor_page = find_exhibitor_page(base_url)
+    if not exhibitor_page:
+        raise HTTPException(status_code=404, detail="Exhibitor page not found")
+
+    exhibitors = scrape_exhibitors(exhibitor_page)
+    if not exhibitors:
+        raise HTTPException(status_code=500, detail="Could not extract exhibitor data")
+
+    csv_path = save_to_csv(exhibitors, "exhibitors.csv")
+    return FileResponse(csv_path, media_type='text/csv', filename="exhibitors.csv")
