@@ -17,13 +17,20 @@ class ShowURL(BaseModel):
     url: str
 
 def ask_gpt_for_exhibitor_link(base_url, html):
-    prompt = f"""
-    Given the following HTML from a trade show homepage ({base_url}),
-    return the most likely full URL path (not just the path, but full URL) for the exhibitor list page.
-    Respond ONLY with the most likely full URL to the exhibitor page.
+ prompt = f"""
+You're a smart crawler trained to analyze trade show websites.
 
-    HTML (first 15000 characters):
+From the HTML provided below, your job is to:
+1. Identify the link that leads to the exhibitor list, sponsor list, partner brands, or booth map.
+2. Respond ONLY with the full URL to that page (absolute URL), nothing else.
+3. Do not explain anything.
+
+The homepage URL is: {base_url}
+
+HTML (first 15000 characters):
 {html[:15000]}
+"""
+
 
     """
     try:
